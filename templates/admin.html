@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FlyAgent 配置</title>
+  <style>
+    :root { font-family: system-ui, sans-serif; background: #0f1419; color: #e6edf3; }
+    body { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+    h1 { font-size: 1.25rem; font-weight: 600; }
+    section { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+    label { display: block; margin: 0.5rem 0 0.25rem; font-size: 0.875rem; color: #8b949e; }
+    select, button { padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #e6edf3; }
+    button { cursor: pointer; }
+    button:hover { background: #30363d; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    th, td { border-bottom: 1px solid #30363d; padding: 0.4rem 0.35rem; text-align: left; vertical-align: top; }
+    th { color: #8b949e; font-weight: 500; }
+    .ok { color: #3fb950; }
+    .fail { color: #f85149; }
+    .mono { font-family: ui-monospace, monospace; word-break: break-all; }
+    .stats { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+    .stat { min-width: 120px; }
+    .stat strong { display: block; font-size: 1.5rem; }
+    .toprow { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 0.5rem; }
+  </style>
+</head>
+<body>
+  <div class="toprow">
+    <h1 style="margin:0;">FlyAgent</h1>
+    <button type="button" id="btnLogout" style="display:none;">退出登录</button>
+  </div>
+
+  <section>
+    <h2 style="margin-top:0;font-size:1rem;">默认大模型</h2>
+    <label for="defProv">Provider</label>
+    <select id="defProv">
+      <option value="doubao">豆包 doubao</option>
+      <option value="deepseek">DeepSeek</option>
+      <option value="qwen">通义 Qwen</option>
+      <option value="kimi">Kimi</option>
+      <option value="openai">OpenAI</option>
+      <option value="claude">Claude</option>
+      <option value="gemini">Gemini</option>
+    </select>
+    <div style="margin-top:0.75rem;">
+      <button type="button" id="saveDef">保存</button>
+      <span id="saveMsg" style="margin-left:0.5rem;color:#8b949e;font-size:0.875rem;"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2 style="margin-top:0;font-size:1rem;">默认聊天预设（models.yaml → chat_prompts）</h2>
+    <p style="margin:0 0 0.5rem;font-size:0.8rem;color:#8b949e;">
+      调用 /api/chat 时若不传 system_prompt，将使用该预设的 system；也可在请求里传 <span class="mono">preset</span> 临时覆盖。
+    </p>
+    <label for="defPresetPrompt">Preset</label>
+    <select id="defPresetPrompt">
+      <option value="">（无预设，仅用 .env 中 FLYAGENT_SYSTEM_PROMPT）</option>
+    </select>
+    <div style="margin-top:0.75rem;">
+      <button type="button" id="savePreset">保存默认预设</button>
+      <span id="savePresetMsg" style="margin-left:0.5rem;color:#8b949e;font-size:0.875rem;"></span>
+    </div>
+    <details style="margin-top:0.75rem;font-size:0.8rem;color:#8b949e;">
+      <summary style="cursor:pointer;color:#c9d1d9;">查看当前选中预设的 system 全文</summary>
+      <pre id="presetSystemPreview" class="mono" style="white-space:pre-wrap;margin:0.5rem 0 0;padding:0.5rem;background:#0d1117;border-radius:6px;max-height:12rem;overflow:auto;"></pre>
+    </details>
+  </section>
+
+  <section>
+    <h2 style="margin-top:0;font-size:1rem;">访问量统计</h2>
+    <div class="stats" id="statsBox">
+      <div class="stat">总请求 <strong id="stTotal">—</strong></div>
+      <div class="stat">近 24 小时 <strong id="st24">—</strong></div>
+      <div class="stat mono" id="stByProv">按模型加载中…</div>
+    </div>
+    <button type="button" id="refresh" style="margin-top:0.75rem;">刷新</button>
+  </section>
+
+  <section>
+    <h2 style="margin-top:0;font-size:1rem;">最近访问记录</h2>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>时间</th>
+            <th>模型</th>
+            <th>耗时 ms</th>
+            <th>结果</th>
+            <th>用户输入</th>
+            <th>回复摘要</th>
+          </tr>
+        </thead>
+        <tbody id="logBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <script>
+    const fetchOpts = { credentials: "include" };
+    let _presetsDetail = [];
+
+    async function checkSession() {
+      const r = await fetch("/api/admin/session", fetchOpts);
+      const j = await r.json();
+      if (j.auth_required) {
+        document.getElementById("btnLogout").style.display = "inline-block";
+      }
+    }
+
+    function updatePresetPreview() {
+      const id = document.getElementById("defPresetPrompt").value;
+      const pre = document.getElementById("presetSystemPreview");
+      if (!id) {
+        pre.textContent = "（无预设时使用 .env 的 FLYAGENT_SYSTEM_PROMPT；若也为空则无 system 消息）";
+        return;
+      }
+      const row = _presetsDetail.find((x) => x.id === id);
+      pre.textContent = row ? row.system : "";
+    }
+
+    async function loadPresetOptions() {
+      const r = await fetch("/api/admin/prompts", fetchOpts);
+      if (r.status === 401) {
+        window.location.href = "/login";
+        return false;
+      }
+      const j = await r.json();
+      _presetsDetail = j.presets || [];
+      const sel = document.getElementById("defPresetPrompt");
+      const keep = sel.value;
+      sel.innerHTML = '<option value="">（无预设，仅用 .env 中 FLYAGENT_SYSTEM_PROMPT）</option>';
+      for (const p of _presetsDetail) {
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = p.name + " (" + p.id + ")";
+        sel.appendChild(opt);
+      }
+      if (keep) sel.value = keep;
+      updatePresetPreview();
+      return true;
+    }
+
+    async function loadSummary() {
+      const r = await fetch("/api/admin/summary", fetchOpts);
+      if (r.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      const j = await r.json();
+      document.getElementById("defProv").value = j.default_provider;
+      const psel = document.getElementById("defPresetPrompt");
+      psel.value = j.default_chat_preset || "";
+      updatePresetPreview();
+      document.getElementById("stTotal").textContent = j.stats.total_requests;
+      document.getElementById("st24").textContent = j.stats.last_24h_requests;
+      const by = j.stats.by_provider || {};
+      document.getElementById("stByProv").textContent =
+        Object.keys(by).length === 0
+          ? "暂无分模型数据"
+          : Object.entries(by).map(([k, v]) => k + ": " + v).join(" · ");
+    }
+
+    async function loadRecent() {
+      const r = await fetch("/api/admin/recent?limit=30", fetchOpts);
+      if (r.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      const j = await r.json();
+      const tb = document.getElementById("logBody");
+      tb.innerHTML = "";
+      for (const row of j.records) {
+        const tr = document.createElement("tr");
+        const ok = row.ok === 1;
+        const t = new Date(row.ts * 1000).toLocaleString();
+        tr.innerHTML =
+          "<td>" + row.id + "</td>" +
+          "<td class='mono'>" + t + "</td>" +
+          "<td>" + row.provider + "</td>" +
+          "<td>" + row.latency_ms + "</td>" +
+          "<td class='" + (ok ? "ok" : "fail") + "'>" + (ok ? "成功" : "失败") + "</td>" +
+          "<td class='mono'>" + escapeHtml((row.user_message || "").slice(0, 120)) + "</td>" +
+          "<td class='mono'>" + escapeHtml((row.assistant_message || "").slice(0, 160)) + "</td>";
+        tb.appendChild(tr);
+      }
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    document.getElementById("saveDef").onclick = async () => {
+      const v = document.getElementById("defProv").value;
+      const r = await fetch("/api/admin/default_provider", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ default_provider: v }),
+      });
+      const msg = document.getElementById("saveMsg");
+      if (r.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      if (r.ok) {
+        msg.textContent = "已保存";
+        msg.style.color = "#3fb950";
+      } else {
+        msg.textContent = "保存失败";
+        msg.style.color = "#f85149";
+      }
+      setTimeout(() => { msg.textContent = ""; }, 2000);
+    };
+
+    document.getElementById("savePreset").onclick = async () => {
+      const v = document.getElementById("defPresetPrompt").value;
+      const r = await fetch("/api/admin/default_chat_preset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ preset: v }),
+      });
+      const msg = document.getElementById("savePresetMsg");
+      if (r.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      if (r.ok) {
+        msg.textContent = "已保存";
+        msg.style.color = "#3fb950";
+      } else {
+        msg.textContent = "保存失败";
+        msg.style.color = "#f85149";
+      }
+      setTimeout(() => { msg.textContent = ""; }, 2000);
+    };
+
+    document.getElementById("refresh").onclick = () => { loadSummary(); loadRecent(); };
+
+    document.getElementById("btnLogout").onclick = async () => {
+      await fetch("/api/admin/logout", { method: "POST", credentials: "include" });
+      window.location.href = "/login";
+    };
+
+    async function boot() {
+      checkSession();
+      await loadPresetOptions();
+      document.getElementById("defPresetPrompt").onchange = updatePresetPreview;
+      await loadSummary();
+      await loadRecent();
+    }
+    boot();
+  </script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+fastapi>=0.115.0
+python-multipart>=0.0.9
+uvicorn[standard]>=0.32.0
+httpx>=0.27.0
+pydantic-settings>=2.6.0
+python-dotenv>=1.0.0
+edge-tts>=7.0.0
+pyyaml>=6.0.0
+# 阿里云智能语音 Python SDK（实时识别 / 一句话识别），见 https://github.com/aliyun/alibabacloud-nls-python-sdk
+# nls 依赖下列包（官方 requirements.txt）；缺了会报 No module named 'aliyunsdkcore'
+aliyun-python-sdk-core>=2.13.3
+oss2>=2.18.0
+matplotlib>=3.3.4
+nls @ git+https://github.com/aliyun/alibabacloud-nls-python-sdk.git@dev

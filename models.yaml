@@ -1,0 +1,202 @@
+# 大模型配置
+#
+# FlyAgent 使用其中以下条目（与接口 provider 同名）：doubao, deepseek, qwen, kimi, openai, claude, gemini
+# 聊天系统提示预设见文末 chat_prompts；API 可用 preset 指定，或在管理页设默认 preset。
+# 各条目的 api_key_env 指向 .env 中的环境变量名；base_url / model / params 在此文件中维护。
+
+models:
+  # OpenAI (用于Planner, Checker, Aggregator) - 已禁用，使用免费模型
+  # 通过OpenRouter调用（国内可用）
+  openai:
+    enabled: true
+    provider: "openai"
+    model: "gpt-5.2"  # OpenRouter会自动转换为 openai/gpt-4 (gpt-3.5-turbo在某些地区不可用)
+    api_key_env: "OPENROUTER_API_KEY"  # 使用OpenRouter API密钥
+    base_url: "https://openrouter.ai/api/v1"
+    use_openrouter: true
+    params:
+      temperature: 0.3
+      max_tokens: 2000
+      http_referer: "https://github.com/dd-Dog/Translator_online"
+      x_title: "Translator Agent"
+  
+  # Gemini (用于Translator-A主译) - 已禁用，使用免费模型
+  # 通过OpenRouter调用（国内可用）
+  gemini:
+    enabled: true
+    provider: "gemini"
+    model: "google/gemini-3.1-pro-preview"  # OpenRouter模型ID，也可用 google/gemini-2.5-pro
+    api_key_env: "OPENROUTER_API_KEY"  # 使用OpenRouter API密钥
+    base_url: "https://openrouter.ai/api/v1"
+    use_openrouter: true
+    params:
+      temperature: 0.3
+      http_referer: "https://github.com/dd-Dog/Translator_online"
+      x_title: "Translator Agent"
+  
+  # Qwen (用于Translator-B对照译和Stylist)
+  # 支持多个模型：qwen-turbo（免费额度）, qwen-plus, qwen-max
+  qwen:
+    enabled: true
+    provider: "qwen"
+    model: "qwen-turbo"  # 免费模型：qwen-turbo, 付费：qwen-plus, qwen-max
+    api_key_env: "QWEN_API_KEY"
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    params:
+      temperature: 0.4
+      max_tokens: 2000
+  
+  # Qwen Plus (可选，更高质量)
+  qwen_plus:
+    enabled: true
+    provider: "qwen"
+    model: "qwen-plus"  # 付费模型，质量更高
+    api_key_env: "QWEN_API_KEY"
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    params:
+      temperature: 0.4
+      max_tokens: 2000
+  
+  # DeepSeek (用于Planner, Checker, Aggregator, Translator-A)
+  # 支持多个模型：deepseek-chat（免费）, deepseek-reasoner（推理模型）
+  deepseek:
+    enabled: true
+    provider: "deepseek"
+    model: "deepseek-chat"  # 免费模型
+    api_key_env: "DEEPSEEK_API_KEY"
+    base_url: "https://api.deepseek.com/v1"
+    params:
+      temperature: 0.3
+      max_tokens: 2000
+  
+  # DeepSeek V3 (可选，更高质量)
+  deepseek_v3:
+    enabled: true
+    provider: "deepseek"
+    model: "deepseek-chat"  # 如果API支持v3，可以改为 "deepseek-chat-v3"
+    api_key_env: "DEEPSEEK_API_KEY"
+    base_url: "https://api.deepseek.com/v1"
+    params:
+      temperature: 0.3
+      max_tokens: 2000
+  
+  # 豆包 (Doubao) - 字节跳动大模型
+  doubao:
+    enabled: true
+    provider: "doubao"
+    model: "doubao-pro-32k"  # 可选: doubao-lite-4k, doubao-pro-32k, doubao-pro-128k
+    api_key_env: "DOUBAO_API_KEY"
+    base_url: "https://ark.cn-beijing.volces.com/api/v3"
+    params:
+      temperature: 0.3
+      max_tokens: 2000
+  
+  # Kimi（Moonshot，FlyAgent）
+  kimi:
+    enabled: true
+    provider: "kimi"
+    model: "moonshot-v1-8k"
+    api_key_env: "KIMI_API_KEY"
+    base_url: "https://api.moonshot.cn/v1"
+    params:
+      temperature: 0.7
+      max_tokens: 2000
+
+  # Claude (可选)
+  # 通过OpenRouter调用（国内可用）；走 OpenAI 兼容 /chat/completions
+  # 若改为 Anthropic 官方 API，设置 base_url 为 https://api.anthropic.com 即可自动走 Messages API
+  claude:
+    enabled: true
+    provider: "claude"
+    model: "anthropic/claude-opus-4.6"  # OpenRouter模型ID，也可用 anthropic/claude-3.7-sonnet
+    api_key_env: "OPENROUTER_API_KEY"  # 使用OpenRouter API密钥
+    base_url: "https://openrouter.ai/api/v1"
+    params:
+      temperature: 0.3
+      max_tokens: 500  # 降低以节省成本
+      http_referer: "https://github.com/dd-Dog/Translator_online"
+      x_title: "Translator Agent"
+
+  # NLLB（Hugging Face No Language Left Behind）
+  # 需 HF_TOKEN 具 Inference Providers 权限；router.huggingface.co/hf-inference 支持 nllb-moe-54b
+  nllb:
+    enabled: true
+    provider: "nllb"
+    model: "facebook/nllb-moe-54b"
+    api_key_env: "HF_TOKEN"  # 在 .env 中配置 HF_TOKEN=xxx，与其他 API 密钥统一管理
+    use_local: false  # true 时用本地 transformers，需安装 transformers torch sentencepiece
+    timeout: 120
+    params: {}
+
+# 工作流Agent配置
+# 全部使用Qwen模型
+workflow:
+  planner:
+    model: "openai"  # 使用Qwen作为Planner
+  translator_a:
+    model: "gemini"  # 使用Qwen作为主译
+  translator_b:
+    model: "claude"  # 使用Qwen作为对照译
+  checker:
+    model: "openai"  # 使用Qwen作为Checker
+  stylist:
+    model: "gemini"  # 使用Qwen作为Stylist
+  aggregator:
+    model: "openai"  # 使用Qwen作为Aggregator
+  
+  # 可选：使用不同模型组合
+  # 方案1: 全部使用DeepSeek（最省钱）
+  # planner: "deepseek"
+  # translator_a: "deepseek"
+  # translator_b: "deepseek"
+  # checker: "deepseek"
+  # stylist: "deepseek"
+  # aggregator: "deepseek"
+  
+  # 方案2: DeepSeek + Qwen混合（推荐，平衡质量和成本）
+  # planner: "deepseek"
+  # translator_a: "deepseek"
+  # translator_b: "qwen"
+  # checker: "deepseek"
+  # stylist: "qwen"
+  # aggregator: "deepseek"
+  
+  # 方案3: 使用Qwen Plus（更高质量，但需要付费）
+  # planner: "qwen_plus"
+  # translator_a: "qwen_plus"
+  # translator_b: "qwen_plus"
+  # checker: "qwen_plus"
+  # stylist: "qwen_plus"
+  # aggregator: "qwen_plus"
+
+# ---------- FlyAgent 聊天：系统提示预设（可选 enabled: false 关闭某项）----------
+# POST /api/chat 传 "preset": "<id>" 覆盖默认；传 system_prompt 非空时完全覆盖预设与全局。
+chat_prompts:
+  brief:
+    name: "一句话回复"
+    system: |
+      请用一句话直接回答用户，不要分段，不要寒暄或「好的」「以下是」等套话，力求最短。
+  detailed:
+    name: "详细说明"
+    system: |
+      请结构化、分点详细说明；必要时举例；如存在多种情况请分别说明；确保信息完整、条理清晰。
+  formal:
+    name: "正式书面"
+    system: |
+      请使用正式、客观、书面语风格回复，避免口语与网络用语，措辞严谨。
+  casual:
+    name: "口语友好"
+    system: |
+      请用自然、口语化、友好的方式回复，可适当使用语气词，但不要冗长。
+
+# 风格配置
+style:
+  default: "general"  # general, academic, official, colloquial
+  glossary: {}  # 术语表，格式：{原文: 统一术语}
+
+# 模型优先级（用于加权策略，保留向后兼容）
+model_weights:
+  openai: 0.4
+  gemini: 0.4
+  qwen: 0.2
+
