@@ -1,2 +1,6 @@
 .env
 需求文档.md
+__pycache__/
+*.pyc
+data/
+alibabacloud-nls-python-sdk/
