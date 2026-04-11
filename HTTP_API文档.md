@@ -109,8 +109,7 @@
   - Body：音频二进制（如 `audio/mpeg`）
   - Header：
     - `Content-Disposition: attachment; filename="voice_reply.mp3"`
-    - `X-ASR-Text`: 识别文本
-    - `X-Reply-Text`: 大模型回复文本
+    - `X-ASR-Text-UrlEncoded` / `X-Reply-Text-UrlEncoded`：识别文本与回复文本经 **URL 百分号编码**（UTF-8），客户端需 `URLDecoder.decode(..., UTF_8)` 再使用（避免 HTTP 头非 ASCII 限制）
     - `X-Provider`: 实际模型
     - `X-Preset`: 实际预设
     - `X-Total-Latency-Ms`: 全链路耗时
@@ -253,6 +252,205 @@
   - ASR 接口建议设置更长超时（例如 60~180 秒）
 - **大响应处理**
   - `/api/chat` 若 `include_audio=true` 可能返回较大 `audio_base64`，可按场景关闭
+
+### 4.1 Android Java 示例（Retrofit 2 + OkHttp + Gson）
+
+仓库内已提供**可拷贝进 Android Studio Module 的完整 Java 源文件**：[`examples/android-java/`](examples/android-java/)（见其中 `README.md`）。
+
+以下与 Kotlin + Retrofit 用法等价，便于对照或按需粘贴片段。
+
+**Gradle（`app/build.gradle`）**
+
+```gradle
+dependencies {
+    implementation "com.squareup.retrofit2:retrofit:2.11.0"
+    implementation "com.squareup.retrofit2:converter-gson:2.11.0"
+    implementation "com.squareup.okhttp3:okhttp:4.12.0"
+    implementation "com.squareup.okhttp3:logging-interceptor:4.12.0"
+}
+```
+
+**API Key 拦截器**
+
+```java
+import java.io.IOException;
+import okhttp3.Interceptor;
+import okhttp3.Request;
+import okhttp3.Response;
+
+public final class ApiKeyInterceptor implements Interceptor {
+    private final String apiKey;
+
+    public ApiKeyInterceptor(String apiKey) {
+        this.apiKey = apiKey;
+    }
+
+    @Override
+    public Response intercept(Chain chain) throws IOException {
+        Request req = chain.request().newBuilder()
+                .header("X-API-Key", apiKey)
+                .build();
+        return chain.proceed(req);
+    }
+}
+```
+
+**请求 / 响应模型（Gson，`@SerializedName` 对应 JSON 字段）**
+
+```java
+import com.google.gson.annotations.SerializedName;
+
+public final class ChatRequest {
+    @SerializedName("message") public String message;
+    @SerializedName("provider") public String provider;
+    @SerializedName("preset") public String preset;
+    @SerializedName("system_prompt") public String systemPrompt;
+    @SerializedName("include_audio") public Boolean includeAudio;
+
+    public ChatRequest(String message) {
+        this.message = message;
+    }
+}
+
+public final class ChatResponse {
+    @SerializedName("provider") public String provider;
+    @SerializedName("text") public String text;
+    @SerializedName("latency_ms") public long latencyMs;
+    @SerializedName("preset") public String preset;
+    @SerializedName("audio_base64") public String audioBase64;
+    @SerializedName("audio_mime") public String audioMime;
+}
+
+public final class PresetsResponse {
+    public static final class PresetItem {
+        @SerializedName("id") public String id;
+        @SerializedName("name") public String name;
+    }
+    @SerializedName("presets") public java.util.List<PresetItem> presets;
+}
+
+public final class AsrFlashResponse {
+    @SerializedName("text") public String text;
+    @SerializedName("latency_ms") public long latencyMs;
+}
+```
+
+**Retrofit 接口**
+
+```java
+import okhttp3.MultipartBody;
+import okhttp3.ResponseBody;
+import retrofit2.Call;
+import retrofit2.http.Body;
+import retrofit2.http.GET;
+import retrofit2.http.Multipart;
+import retrofit2.http.POST;
+import retrofit2.http.Part;
+import retrofit2.http.Query;
+
+public interface FlyAgentApi {
+
+    @POST("/api/chat")
+    Call<ChatResponse> chat(@Body ChatRequest body);
+
+    @GET("/api/presets")
+    Call<PresetsResponse> presets();
+
+    @Multipart
+    @POST("/api/asr/flash")
+    Call<AsrFlashResponse> asrFlash(
+            @Part MultipartBody.Part file,
+            @Query("format") String format,
+            @Query("sample_rate") int sampleRate
+    );
+
+    /** 一站式语音：响应体为音频二进制，文本在 Header 的 *-UrlEncoded 中 */
+    @Multipart
+    @POST("/api/voice/chat")
+    Call<ResponseBody> voiceChat(
+            @Part MultipartBody.Part file,
+            @Query("asr_engine") String asrEngine,
+            @Query("format") String format,
+            @Query("sample_rate") int sampleRate,
+            @Query("provider") String provider,
+            @Query("preset") String preset,
+            @Query("voice") String voice
+    );
+}
+```
+
+**构建 `Retrofit`（普通超时 + 上传用长超时可拆两个 `OkHttpClient`）**
+
+```java
+import java.util.concurrent.TimeUnit;
+import okhttp3.OkHttpClient;
+import retrofit2.Retrofit;
+import retrofit2.converter.gson.GsonConverterFactory;
+
+public final class FlyAgentRetrofit {
+
+    public static FlyAgentApi create(String baseUrl, String apiKey) {
+        OkHttpClient client = new OkHttpClient.Builder()
+                .addInterceptor(new ApiKeyInterceptor(apiKey))
+                .connectTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(180, TimeUnit.SECONDS)
+                .writeTimeout(180, TimeUnit.SECONDS)
+                .build();
+
+        return new Retrofit.Builder()
+                .baseUrl(baseUrl.endsWith("/") ? baseUrl : baseUrl + "/")
+                .client(client)
+                .addConverterFactory(GsonConverterFactory.create())
+                .build()
+                .create(FlyAgentApi.class);
+    }
+}
+```
+
+**调用示例（须在后台线程；下面用伪代码 `runOnBackground` 表示）**
+
+```java
+import java.io.File;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import okhttp3.MediaType;
+import okhttp3.MultipartBody;
+import okhttp3.RequestBody;
+import okhttp3.ResponseBody;
+import retrofit2.Response;
+
+// 聊天
+FlyAgentApi api = FlyAgentRetrofit.create("http://你的服务器:8765", "你的API密钥");
+ChatRequest req = new ChatRequest("你好");
+req.preset = "brief";
+req.includeAudio = false;
+Response<ChatResponse> chatResp = api.chat(req).execute();
+if (chatResp.isSuccessful() && chatResp.body() != null) {
+    String reply = chatResp.body().text;
+}
+
+// 上传 WAV 做 Flash 识别
+File wav = new File("/path/to/recording.wav");
+RequestBody rb = RequestBody.create(wav, MediaType.parse("audio/wav"));
+MultipartBody.Part part = MultipartBody.Part.createFormData("file", wav.getName(), rb);
+Response<AsrFlashResponse> asrResp = api.asrFlash(part, "wav", 16000).execute();
+
+// 语音对话：取音频字节 + 解码 Header 中文
+Response<ResponseBody> voiceResp = api.voiceChat(part, "flash", "wav", 16000, null, "brief", null).execute();
+if (voiceResp.isSuccessful() && voiceResp.body() != null) {
+    byte[] mp3 = voiceResp.body().bytes();
+    String asrEnc = voiceResp.headers().get("X-ASR-Text-UrlEncoded");
+    String replyEnc = voiceResp.headers().get("X-Reply-Text-UrlEncoded");
+    String asrText = asrEnc != null ? URLDecoder.decode(asrEnc, StandardCharsets.UTF_8) : "";
+    String replyText = replyEnc != null ? URLDecoder.decode(replyEnc, StandardCharsets.UTF_8) : "";
+}
+```
+
+**说明**
+
+- 未配置 `FLYAGENT_API_KEY` 时，不要添加 `ApiKeyInterceptor`（或传空不添加该拦截器）。
+- Android 9+ 默认禁止明文 HTTP：若仍用 `http://`，需在 `networkSecurityConfig` 中放行对应域名，或改用 HTTPS。
+- 生产环境可用 `enqueue` 代替 `execute`，并在主线程更新 UI。
 
 ## 5. 非 HTTP（补充）
 

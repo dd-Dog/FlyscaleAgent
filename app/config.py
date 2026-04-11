@@ -68,6 +68,14 @@ class NlsSettings(BaseSettings):
         validation_alias="NLS_GATEWAY_URL",
     )
     token_region: str = Field(default="cn-shanghai", validation_alias="NLS_TOKEN_REGION")
+    # CreateToken 的 Meta 域名，见 https://help.aliyun.com/zh/isi/getting-started/obtain-an-access-token
+    token_meta_domain: str = Field(
+        default="nls-meta.cn-shanghai.aliyuncs.com",
+        validation_alias="NLS_TOKEN_META_DOMAIN",
+    )
+    token_api_version: str = Field(default="2019-02-28", validation_alias="NLS_TOKEN_API_VERSION")
+    # 在阿里云返回的 ExpireTime 之前提前多少秒换新 token（默认 5 分钟）
+    token_refresh_margin_sec: int = Field(default=300, ge=60, le=3600, validation_alias="NLS_TOKEN_REFRESH_MARGIN_SEC")
     flash_url: str = Field(
         default="https://nls-gateway-cn-shanghai.aliyuncs.com/stream/v1/FlashRecognizer",
         validation_alias="NLS_FLASH_URL",

@@ -17,7 +17,9 @@ from app.config import get_nls_settings, nls_configured
 logger = logging.getLogger(__name__)
 
 _token_cache: tuple[str, float] | None = None
-_TOKEN_TTL_SEC = 50 * 60
+_token_lock = threading.Lock()
+# CreateToken 未返回 ExpireTime 时的兜底缓存时长（秒）
+_FALLBACK_CACHE_SEC = 50 * 60
 
 
 def _import_nls() -> Any:
@@ -34,10 +36,45 @@ def _import_nls() -> Any:
         ) from e
 
 
+def _create_token_via_meta_api() -> tuple[str, float | None]:
+    """
+    调用阿里云 CreateToken，返回 (Token.Id, Token.ExpireTime)。
+    ExpireTime 为 Unix 时间戳（秒），见官方文档「获取 Token」。
+    """
+    from aliyunsdkcore.client import AcsClient
+    from aliyunsdkcore.request import CommonRequest
+
+    s = get_nls_settings()
+    client = AcsClient(s.access_key_id, s.access_key_secret, s.token_region)
+    request = CommonRequest()
+    request.set_method("POST")
+    request.set_domain(s.token_meta_domain)
+    request.set_version(s.token_api_version)
+    request.set_action_name("CreateToken")
+    raw = client.do_action_with_exception(request)
+    data = json.loads(raw)
+    token_obj = data.get("Token")
+    if not isinstance(token_obj, dict):
+        raise RuntimeError(f"CreateToken 响应缺少 Token: {data}")
+    tid = token_obj.get("Id")
+    if not tid or not isinstance(tid, str):
+        raise RuntimeError(f"CreateToken 响应缺少 Token.Id: {data}")
+    exp = token_obj.get("ExpireTime")
+    expire_ts: float | None = None
+    if exp is not None:
+        try:
+            expire_ts = float(exp)
+        except (TypeError, ValueError):
+            expire_ts = None
+    return tid, expire_ts
+
+
 def get_nls_token() -> str:
+    """
+    返回 NLS 访问令牌；按阿里云返回的 ExpireTime 缓存（通常约 24 小时有效），
+    在过期前 NLS_TOKEN_REFRESH_MARGIN_SEC 秒自动重新申请。
+    """
     global _token_cache
-    nls_mod, getToken = _import_nls()
-    _ = nls_mod  # noqa: F841
     if not nls_configured():
         raise RuntimeError(
             "请在 .env 中配置 NLS_ACCESS_KEY_ID、NLS_ACCESS_KEY_SECRET、NLS_APP_KEY（智能语音交互项目 AppKey）"
@@ -45,10 +82,38 @@ def get_nls_token() -> str:
     now = time.time()
     if _token_cache and now < _token_cache[1]:
         return _token_cache[0]
-    s = get_nls_settings()
-    tid = getToken(s.access_key_id, s.access_key_secret, domain=s.token_region)
-    _token_cache = (tid, now + _TOKEN_TTL_SEC)
-    return tid
+
+    with _token_lock:
+        now = time.time()
+        if _token_cache and now < _token_cache[1]:
+            return _token_cache[0]
+
+        s = get_nls_settings()
+        margin = float(s.token_refresh_margin_sec)
+        tid, expire_ts = _create_token_via_meta_api()
+
+        if expire_ts is not None and expire_ts > now + margin:
+            valid_until = expire_ts - margin
+        elif expire_ts is not None and expire_ts > now:
+            # 已接近或不足 margin，短缓存避免立刻死循环
+            valid_until = max(now + 30.0, expire_ts - 10.0)
+        else:
+            valid_until = now + _FALLBACK_CACHE_SEC
+            logger.warning(
+                "CreateToken 未返回有效 ExpireTime，使用兜底缓存 %s 秒",
+                _FALLBACK_CACHE_SEC,
+            )
+
+        _token_cache = (tid, valid_until)
+        if expire_ts is not None:
+            logger.info(
+                "NLS token 已刷新，阿里云 ExpireTime=%s（约 %.1f 小时后需换新）",
+                int(expire_ts),
+                max(0.0, (expire_ts - now) / 3600.0),
+            )
+        else:
+            logger.info("NLS token 已刷新（未解析到 ExpireTime，使用短周期兜底）")
+        return tid
 
 
 def nls_message_text(message: str) -> str:
