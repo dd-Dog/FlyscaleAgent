@@ -1,0 +1,94 @@
+# FlyAgent 内置工具的外部地址与参数（与代码分离，可按环境修改）
+# 路径可通过环境变量 FLYAGENT_TOOLS_CONFIG_PATH 覆盖，默认本文件。
+
+version: 1
+
+# 一级预取规则：命中则服务端先调内置工具再单次 LLM（见 app/tool_tier1.py）。
+# 删除本段或设 rules: [] 时回退到代码内默认规则；可增删规则条目、改关键词/正则。
+tier1_prefetch:
+  rules:
+    - matcher: weather_place
+      kind: weather
+      tool: get_weather
+      anchor: "天气"
+      cues:
+        - "天气"
+        - "气温"
+        - "下雨"
+        - "降雨"
+        - "下雪"
+        - "预报"
+      strip_leading: '^[\s，。！？、；请问帮我查一下我想知道:]+'
+      strip_remove:
+        - "(查询|查一下|查下|查查看|看下|看看|告诉我|说下|麻烦|请)"
+        - "(明天|今日|今天|后天|明日|今儿|明儿|後天)"
+      place_strip_chars: " 的、，。！？"
+      collapse_ws: true
+      place_len_min: 2
+      place_len_max: 36
+      days:
+        default: 1
+        clamp: [1, 3]
+        rules:
+          - if_contains: ["后天", "後天"]
+            value: 3
+          - if_contains: ["明天", "明日", "明儿"]
+            value: 2
+
+    - matcher: news_headlines
+      kind: news
+      tool: get_news_headlines
+      max_input_len: 400
+      cues:
+        - "新闻"
+        - "头条"
+        - "资讯"
+        - "消息"
+      topic_regex: '(?:关于|有关|聊聊|说说)\s*([^\s，。！？]{1,24}?)\s*(?:的)?\s*(?:新闻|消息|资讯|头条)'
+      topic_min_len: 2
+      limit_default: 8
+      limit_rules:
+        - if_contains: ["5", "五条"]
+          value: 5
+
+# Open-Meteo 公开 API（无需密钥）
+open_meteo:
+  geocode_url: "https://geocoding-api.open-meteo.com/v1/search"
+  forecast_url: "https://api.open-meteo.com/v1/forecast"
+  timezone: "Asia/Shanghai"
+  # 优先用 Nominatim 将用户输入一次性规范为标准地址+坐标（单请求）；失败再回退 Open-Meteo 地理编码
+  # 使用政策: https://operations.osmfoundation.org/policies/nominatim/
+  use_nominatim: true
+  nominatim_url: "https://nominatim.openstreetmap.org/search"
+  # 请改为含邮箱的 UA，便于 OSM 联系（示例）：FlyAgent/1.0 (you@example.com)
+  nominatim_user_agent: "FlyAgent/1.0 (https://github.com/dd-Dog/FlyscaleAgent)"
+  nominatim_limit: 5
+  # 留空表示全球；填 cn 仅中国境内
+  nominatim_countrycodes: ""
+  nominatim_accept_language: "zh-CN,zh;q=0.9,en;q=0.8"
+  # 地理编码依次尝试的语言代码（仅 Open-Meteo 回退路径）
+  geocode_language_try: ["zh", "en"]
+  # 可选：难解析地名 -> 搜索用名
+  # geocode_aliases:
+  #   "天津滨海新区": "Tianjin"
+
+# Google News RSS（若需替换为人民网等，改 default_url / search_url）
+news_rss:
+  default_url: "https://news.google.com/rss"
+  search_url: "https://news.google.com/rss/search"
+  query_params:
+    hl: "zh-CN"
+    gl: "CN"
+    ceid: "CN:zh-Hans"
+
+# 航班：官方无免费通用 API，此处通过「可配置 HTTP 下游」对接你自己的航旅服务 / 爬虫网关
+# 下游建议契约：POST JSON {"origin_city","destination_city","date":"YYYY-MM-DD"}，返回 JSON 由模型解读
+flight:
+  enabled: true
+  http:
+    url: ""
+    method: "POST"
+    timeout_sec: 30
+    extra_headers: {}
+    # 若填写环境变量名，则从进程环境读取密钥并加入请求头 Authorization: Bearer <值>
+    api_key_env: ""

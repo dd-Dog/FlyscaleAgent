@@ -25,6 +25,7 @@
   - `preset` (string, 可选): 对应 `models.yaml` 中 `chat_prompts` 的 id
   - `system_prompt` (string, 可选): 若非空，优先级高于 `preset`
   - `include_audio` (boolean, 可选, 默认 `true`)
+  - `use_tools` (boolean, 可选): 内置天气/新闻工具（OpenAI 兼容 `tools`）。`null` 时由服务端 `FLYAGENT_TOOLS_ENABLED` 与关键词轻判决定是否挂工具；`true`/`false` 为强制开/关。开启且 **`FLYAGENT_TOOLS_TIER1_ENABLED=true`** 时，部分句式会先走一级规则服务端预取工具再单次对话，见返回字段说明。
 
 - **返回示例**
 ```json
@@ -33,10 +34,28 @@
   "text": "你好，我是 FlyAgent。",
   "latency_ms": 520,
   "preset": "brief",
+  "tools": {
+    "trace_id": "a1b2c3d4e5f6",
+    "tools_offered": false,
+    "tool_model_calls": 1,
+    "tool_turns_with_calls": 0,
+    "tier1_prefetch": null,
+    "tool_loop_skipped": false,
+    "tier1_tool_latency_ms": null
+  },
   "audio_base64": "<base64...>",
   "audio_mime": "audio/mpeg"
 }
 ```
+
+- **说明**
+  - 使用 **Claude 原生 Messages API** 的 provider 当前不启用 HTTP tools，行为与原先单次 chat 一致。
+  - 工具循环最大请求次数由环境变量 **`FLYAGENT_TOOLS_MAX_MODEL_CALLS`** 限制（默认 6）。
+  - **`tools.trace_id`**：与服务器日志、文件 **`FLYAGENT_LLM_TOOL_TRACE_PATH`**（默认 `data/llm_tool_trace.log`）中的 `[trace_id]` 行对应，便于按次排查。将 logger **`app.llm.tool_loop`** 设为 **DEBUG** 可输出 `messages_json` 截断片段。
+  - **`tools.tier1_prefetch`**：一级规则命中时为 `"weather"` 或 `"news"`，否则为 `null`。
+  - **`tools.tool_loop_skipped`**：为 `true` 表示未走 OpenAI `tools` 多轮（通常为 Tier1 预取 + 单次 chat）。
+  - **`tools.tier1_tool_latency_ms`**：Tier1 路径下服务端执行内置工具的耗时（毫秒）；非 Tier1 为 `null`。
+  - 工具所访问的外部地址在 **`tools_config.yaml`**（可用 **`FLYAGENT_TOOLS_CONFIG_PATH`** 指定路径），含天气、新闻 RSS、**航班下游 HTTP**；扩展方式见 **`docs/TOOLS_EXTENSION.md`**。
 
 - **错误**
   - `400`：如 `preset` 无效
@@ -104,6 +123,10 @@
     - `provider`：可选，模型提供商；不传走默认
     - `preset`：可选；不传时默认 `brief`
     - `voice`：可选；不传走 `NLS_TTS_VOICE`
+    - `use_tools`：可选，语义同 `POST /api/chat` 的 `use_tools`
+
+- **上传时长**
+  - 服务端按 `format`/`sample_rate` 估算时长，超过 **`FLYAGENT_AUDIO_MAX_DURATION_SEC`**（默认 300 秒）返回 `400`；`0` 表示不限制。
 
 - **成功响应**
   - Body：音频二进制（如 `audio/mpeg`）
@@ -159,6 +182,7 @@
 
 - **限制与错误**
   - 文件大小上限：`32MB`
+  - 时长上限：同全局 `FLYAGENT_AUDIO_MAX_DURATION_SEC`（默认可解析格式下最长 5 分钟）
   - `413`：文件过大
   - `503`：NLS 未配置
   - `502`：识别失败
@@ -190,6 +214,7 @@
 
 - **限制与错误**
   - 文件大小上限：`100MB`
+  - 时长上限：同 `FLYAGENT_AUDIO_MAX_DURATION_SEC`
   - `413`：文件过大
   - `503`：NLS 未配置
   - `502`：FlashRecognizer 调用失败

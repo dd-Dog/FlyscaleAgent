@@ -39,7 +39,7 @@ models:
   qwen:
     enabled: true
     provider: "qwen"
-    model: "qwen3.6-plus"  # 免费模型：qwen-turbo, 付费：qwen-plus, qwen-max
+    model: "qwen-turbo"  # 免费模型：qwen-turbo速度快，适于闲聊, 付费：qwen3.6-plus 速度慢，适用于复杂问题, qwen-max
     api_key_env: "QWEN_API_KEY"
     base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
     params:

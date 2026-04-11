@@ -26,6 +26,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app import llm, store, tts
 from app import nls_asr
+from app.audio_util import check_audio_duration
 from app.auth import (
     admin_login_configured,
     api_key_configured,
@@ -41,6 +42,8 @@ from app.models_yaml import (
     list_chat_preset_summaries,
     resolve_chat_system,
 )
+from app.llm_trace import ensure_tool_trace_logging
+from app.tool_intent import should_offer_tools
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +67,7 @@ app.add_middleware(
 def _startup() -> None:
     store.init_db()
     get_models_document()
+    ensure_tool_trace_logging()
     s = get_app_settings()
     if admin_login_configured() and not s.session_secret.strip():
         raise RuntimeError(
@@ -82,6 +86,8 @@ class ChatBody(BaseModel):
     preset: Optional[str] = Field(default=None, max_length=64)
     system_prompt: Optional[str] = None
     include_audio: bool = True
+    # None：全局 FLYAGENT_TOOLS_ENABLED + 关键词轻判；True：强制允许工具；False：禁用工具
+    use_tools: Optional[bool] = None
 
 
 class AdminDefaultBody(BaseModel):
@@ -126,9 +132,21 @@ async def api_chat(
             detail=f"无效的 preset: {e.args[0]}，可用 id 见 GET /api/presets",
         ) from e
 
+    if body.use_tools is False:
+        offer_tools = False
+    elif body.use_tools is True:
+        offer_tools = settings.tools_enabled
+    else:
+        offer_tools = settings.tools_enabled and should_offer_tools(body.message)
+
     t0 = time.perf_counter()
     try:
-        text, latency_llm = await llm.chat_completion(provider, body.message, sys_p)
+        text, latency_llm, tools_meta = await llm.chat_completion_with_tools(
+            provider,
+            body.message,
+            sys_p,
+            offer_tools=offer_tools,
+        )
     except Exception as e:
         latency_llm = int((time.perf_counter() - t0) * 1000)
         err = str(e)
@@ -142,6 +160,7 @@ async def api_chat(
         "text": text,
         "latency_ms": latency_llm,
         "preset": preset_used,
+        "tools": tools_meta,
     }
 
     if body.include_audio and text:
@@ -192,6 +211,10 @@ async def api_voice_chat(
         description="聊天预设；不传时默认 brief（单句回复）",
     ),
     voice: Optional[str] = Query(None, description="TTS 发音人，不传走 NLS_TTS_VOICE"),
+    use_tools: Optional[bool] = Query(
+        None,
+        description="None 走全局与关键词轻判；true/false 强制开关内置工具",
+    ),
 ) -> Response:
     """
     端到端语音 AI：
@@ -202,6 +225,10 @@ async def api_voice_chat(
     body = await file.read()
     if len(body) > 100 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="音频文件过大（>100MB）")
+    try:
+        check_audio_duration(body, format, sample_rate, settings.audio_max_duration_sec)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     # 1) ASR
     t0 = time.perf_counter()
@@ -246,8 +273,20 @@ async def api_voice_chat(
     except KeyError as e:
         raise HTTPException(status_code=400, detail=f"无效 preset: {e.args[0]}") from e
 
+    if use_tools is False:
+        offer_tools = False
+    elif use_tools is True:
+        offer_tools = settings.tools_enabled
+    else:
+        offer_tools = settings.tools_enabled and should_offer_tools(user_text)
+
     try:
-        answer_text, _ = await llm.chat_completion(selected_provider, user_text, sys_p)
+        answer_text, _, _ = await llm.chat_completion_with_tools(
+            selected_provider,
+            user_text,
+            sys_p,
+            offer_tools=offer_tools,
+        )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM 失败: {e}") from e
 
@@ -302,6 +341,10 @@ async def asr_recognize(
     if len(body) > 32 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="音频文件过大（>32MB）")
     try:
+        check_audio_duration(body, format, sample_rate, get_app_settings().audio_max_duration_sec)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    try:
         text = await asyncio.to_thread(
             partial(
                 nls_asr.recognize_once,
@@ -328,6 +371,10 @@ async def asr_flash(
     body = await file.read()
     if len(body) > 100 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="音频文件过大（>100MB）")
+    try:
+        check_audio_duration(body, format, sample_rate, get_app_settings().audio_max_duration_sec)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     t0 = time.perf_counter()
     try:
