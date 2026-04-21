@@ -1,0 +1,26 @@
+# 复制到 Ubuntu：sudo cp scripts/flyagent.service.example /etc/systemd/system/flyagent.service
+# 按需修改 User、Group、WorkingDirectory、ExecStart 中的路径与端口，然后：
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable flyagent
+#   sudo systemctl start flyagent
+
+[Unit]
+Description=FlyAgent (uvicorn FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=flyagent
+Group=flyagent
+WorkingDirectory=/opt/flyagent
+Environment=PATH=/opt/flyagent/.venv/bin:/usr/bin:/bin
+ExecStart=/opt/flyagent/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8765
+Restart=on-failure
+RestartSec=5
+
+# 可选：限制资源（按机器调整）
+# MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target

@@ -86,7 +86,9 @@
 
 - **请求体（JSON）**
   - `text` (string, 必填, 1~5000)
-  - `voice` (string, 可选): 发音人，如 `xiaoyun`（不传则用服务端配置）
+  - `voice` (string, 可选): 发音人，如 `longhouge_v3`（不传则用服务端配置 `NLS_TTS_VOICE`，默认 `longhouge_v3`）
+
+- **服务端默认**：语速由环境变量 **`NLS_TTS_SPEECH_RATE`** 控制（阿里云整数 -500～500，默认 **166** 约 **1.2 倍速**；`0` 为约 1.0 倍）。`POST /api/chat` 附带 TTS 时同样生效。
 
 - **返回示例**
 ```json

@@ -11,14 +11,33 @@ from app.config import ProviderId, get_app_settings
 from app.llm_trace import trace_logger
 from app.models_yaml import resolve_provider_model
 from app.tool_tier1 import analyze_tier1
+from app.tools_config_loader import tool_loop_system_suffix_override
 
 _tlog = trace_logger()
 
-_TOOL_SYSTEM_SUFFIX = (
-    "\n\n【工具策略】当用户需要实时天气、新闻头条或航班/机票等行程信息时，使用提供的工具；"
-    "闲聊、常识、解题、翻译等不要调用工具。航班工具若返回未配置下游，请如实说明并建议官方购票渠道。"
-    "\n【效率】同一用户问题内，每种工具尽量只调用一次；天气工具若已返回有效预报数据，不要因「区县级地名」再换城市名重复调用。"
+# 仅用于 OpenAI tools 多轮路径，拼在业务 system_prompt 之后；可用 tools_config.yaml tool_loop.system_suffix 覆盖或写 "" 关闭
+_DEFAULT_TOOL_SYSTEM_SUFFIX = (
+    "【工具策略】仅在用户需要工具所能提供的实时信息（如天气、新闻标题摘要、航班行程等）时再调用工具；"
+    "一般知识问答、闲聊、翻译、解题不要调用。若工具返回未配置或含 error，如实说明，勿编造。"
+    "\n【效率】同一用户问题内同类工具尽量只调用一次；已得到有效结果时不要重复调用。"
 )
+
+
+def _effective_tool_system_suffix() -> str:
+    o = tool_loop_system_suffix_override()
+    if o is not None:
+        return o
+    return _DEFAULT_TOOL_SYSTEM_SUFFIX
+
+
+def _compose_system_prompt_with_tools(system_prompt: str) -> str:
+    base = (system_prompt or "").strip()
+    suf = _effective_tool_system_suffix().strip()
+    if not suf:
+        return base
+    if not base:
+        return suf
+    return f"{base}\n\n{suf}"
 
 
 def _clip(text: str, limit: int = 280) -> str:
@@ -327,7 +346,7 @@ async def chat_completion_with_tools(
     trace_id = uuid.uuid4().hex[:12]
     meta["trace_id"] = trace_id
     max_calls = settings.tools_max_model_calls
-    sys_full = (system_prompt.strip() + _TOOL_SYSTEM_SUFFIX).strip()
+    sys_full = _compose_system_prompt_with_tools(system_prompt)
     messages: list[dict[str, Any]] = [{"role": "system", "content": sys_full}]
     messages.append({"role": "user", "content": user_text})
 

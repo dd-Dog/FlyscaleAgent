@@ -3,6 +3,13 @@
 
 version: 1
 
+# OpenAI tools 多轮时追加在「业务 system_prompt」后的说明（Tier1 单次 chat 不追加）。
+# 不写 tool_loop / system_suffix：使用代码内中性默认。
+# system_suffix: "" 表示完全不追加工具说明（适合工具由关键词严格触发、想全靠自建 system 的场景）。
+# tool_loop:
+#   system_suffix: |
+#     【工具】仅当用户明确要「新闻标题/摘要」时使用资讯工具；勿对观点分析、历史知识等调用工具。
+
 # 一级预取规则：命中则服务端先调内置工具再单次 LLM（见 app/tool_tier1.py）。
 # 删除本段或设 rules: [] 时回退到代码内默认规则；可增删规则条目、改关键词/正则。
 tier1_prefetch:

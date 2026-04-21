@@ -98,11 +98,12 @@ class NlsSettings(BaseSettings):
         validation_alias="NLS_FLASH_URL",
     )
     # Online TTS via NLS SpeechSynthesizer
-    tts_voice: str = Field(default="xiaoyun", validation_alias="NLS_TTS_VOICE")
+    tts_voice: str = Field(default="longhouge_v3", validation_alias="NLS_TTS_VOICE")
     tts_format: str = Field(default="mp3", validation_alias="NLS_TTS_FORMAT")
     tts_sample_rate: int = Field(default=16000, validation_alias="NLS_TTS_SAMPLE_RATE")
     tts_volume: int = Field(default=50, validation_alias="NLS_TTS_VOLUME")
-    tts_speech_rate: int = Field(default=0, validation_alias="NLS_TTS_SPEECH_RATE")
+    # 语速：-500～500，0≈1.0x；166≈1.2x（见阿里云语音合成 speech_rate 说明）
+    tts_speech_rate: int = Field(default=166, ge=-500, le=500, validation_alias="NLS_TTS_SPEECH_RATE")
     tts_pitch_rate: int = Field(default=0, validation_alias="NLS_TTS_PITCH_RATE")
 
 

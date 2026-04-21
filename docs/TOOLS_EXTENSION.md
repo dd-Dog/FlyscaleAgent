@@ -13,6 +13,7 @@
 | `news_rss` | 综合资讯与关键词搜索的 RSS URL、公共 query 参数 |
 | `flight` | 是否启用 `search_flights` 工具；`flight.http` 对接自建航旅 HTTP |
 | `tier1_prefetch` | 一级预取规则列表（天气/新闻等），见 §4 |
+| `tool_loop` | （可选）`system_suffix` 覆盖 tools 多轮时追加在业务 system 后的策略段；`""` 表示不追加 |
 
 ### 1.1 天气：标准地名（Nominatim）
 

@@ -35,3 +35,18 @@ def get_tools_config() -> dict[str, Any]:
     if not path.is_file():
         return {}
     return _load_document(str(path.resolve()), path.stat().st_mtime)
+
+
+def tool_loop_system_suffix_override() -> str | None:
+    """
+    tool_loop.system_suffix 显式配置时返回该字符串（可为空串表示不追加工具说明）；
+    未配置该项则返回 None，由 llm 模块使用内置默认后缀。
+    """
+    cfg = get_tools_config()
+    block = cfg.get("tool_loop")
+    if not isinstance(block, dict) or "system_suffix" not in block:
+        return None
+    val = block["system_suffix"]
+    if isinstance(val, str):
+        return val
+    return None

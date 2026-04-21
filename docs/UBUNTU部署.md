@@ -109,7 +109,11 @@ curl -s -H "X-API-Key: 你的密钥" http://127.0.0.1:8765/api/presets
 
 ---
 
-## 7. systemd 常驻（推荐）
+## 7. systemd 常驻（推荐，**开机自启**）
+
+用 **systemd** 管理进程：崩溃可自动拉起，**开机自动运行**（`enable` 后无需再手敲 `uvicorn`）。
+
+仓库提供示例单元文件：**`scripts/flyagent.service.example`**，可复制到 `/etc/systemd/system/flyagent.service` 后按你的安装路径修改 `User` / `WorkingDirectory` / `ExecStart`。
 
 创建服务用户（可选，更安全）：
 
@@ -121,10 +125,15 @@ sudo chown -R flyagent:flyagent /opt/flyagent
 创建服务文件：
 
 ```bash
+# 若已把项目放在 /opt/flyagent，可直接：
+sudo cp /opt/flyagent/scripts/flyagent.service.example /etc/systemd/system/flyagent.service
+sudo nano /etc/systemd/system/flyagent.service   # 核对路径、端口、User
+
+# 或手动创建：
 sudo nano /etc/systemd/system/flyagent.service
 ```
 
-内容示例（按实际路径修改 `User` / `WorkingDirectory`）：
+内容示例（按实际路径修改 `User` / `WorkingDirectory`；与下面示例等价时可不手写）：
 
 ```ini
 [Unit]
@@ -145,14 +154,16 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-启用并启动：
+启用并启动（**`enable` = 写入开机自启**）：
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable flyagent
-sudo systemctl start flyagent
+sudo systemctl enable flyagent    # 随 multi-user.target 开机启动
+sudo systemctl start flyagent     # 立即启动
 sudo systemctl status flyagent
 ```
+
+取消开机自启：`sudo systemctl disable flyagent`（不删单元文件）。
 
 日志：
 
@@ -248,3 +259,5 @@ sudo systemctl restart flyagent
 - 客户端 HTTP 接口：`HTTP_API文档.md`
 - 模型与聊天预设：`models.yaml`
 - 环境变量示例：`.env.example`
+- systemd 单元模板：`scripts/flyagent.service.example`
+- Windows 计划任务 / NSSM：`docs/WINDOWS_STARTUP.md`（仅 Windows）
